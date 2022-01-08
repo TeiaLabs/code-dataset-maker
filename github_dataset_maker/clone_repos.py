@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
-from typing import Iterable, Literal, Optional
+from typing import Iterable, List, Literal, Optional
 
 from tap import Tap as TypedArgumentParser
 
 from . import utils
+
 
 def clone_each(
     repos_urls: Iterable[str],
@@ -68,7 +69,7 @@ def create_clone_script(repo_list_path: Path, destination_dir: Path, script_path
 class CloneScriptCreatorArgs(TypedArgumentParser):
     custom_ssh_key: Optional[Path] = None  # Path to the ssh key to use for cloning.
     destination_dir: Path = Path(".")  # Where to save the cloned repos
-    languages: list[Literal["python", "javascript", "java"]]
+    languages: List[Literal["python", "javascript", "java"]]
     repo_list_path: Path  # Path to file containing repo URLs (one per line)
     script_path: Path = Path("clone.sh") # Path to save the created script
     split_lists: bool = False  # If true, glob repo_list_path for repo lists *.txt.
