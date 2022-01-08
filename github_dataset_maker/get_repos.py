@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import json
-from multiprocessing.sharedctypes import Value
 import os
-import time
 from pathlib import Path
-from typing import Any, Iterable, Literal, Mapping, Tuple, TypedDict
+from typing import Iterable, Literal, Tuple, TypedDict
 
-import pandas as pd
 from dotenv import load_dotenv
 from github import Github
 from github.Repository import Repository
 from tap import Tap as TypedArgumentParser
 
+from . import utils
 from .rate_limit import check_rate_limit, wait_on_rate_limits
 from .supported_languages import programming_languages
 
@@ -20,44 +17,22 @@ load_dotenv()
 API_TOKEN = os.environ["GITHUB_API_TOKEN"]
 
 
-def export_to_csv(list_of_objs: Iterable[Mapping[str, Any]], csv_path: Path):
-    """
-    Create .csv file out of list of objs. Append to .csv if existing.
-
-    Do not check if the headers match (to avoid wasting I/O).
-    """
-    df = pd.DataFrame.from_dict(list_of_objs)
-    if csv_path.is_file():
-        df.to_csv(csv_path, mode="a", header=False, index=False)
-    else:
-        df.to_csv(csv_path, index=False)
-
-
 class ArgParser(TypedArgumentParser):
     stars: Tuple[int, int]  # range of stars of repositories to be included in the dataset
     lang: str  # programming language
-    output: str = None # filename to be used on the .json and .txt files
+    output: str = "" # filename to be used on the .json and .txt files
     step: int  # size of step in range of stars
     mode: Literal["exact", "greater-than", "ranged"]  # Search operator for the stars parameter of the query
 
-    def check_args(self):
-        super().configure()
+    def process_args(self):
         if self.lang not in programming_languages:
             msg = f"{self.lang} is not a supported programming language"
             raise ValueError(msg)
-        if self.output is None:
-            self.output = f"{self.lang}_{self.stars[0]}-{self.stars[1]}"
-
-
-def save_json(repos: list, filename: Path | str) -> None:
-    with open(filename, "w") as f:
-        json.dump(repos, f, indent=2)
-
-
-def save_multiline_txt(strings: list, filename: Path | str, append: bool = True) -> None:
-    op = "a" if append else "w"
-    with open(filename, op) as f:
-        f.writelines(f"{s}\n" for s in strings)
+        if self.output == "":
+            if len(self.stars) == 2:
+                self.output = f"{self.lang}_{self.stars[0]}-{self.stars[1]}"
+            elif len(self.stars) == 1:
+                self.output = f"{self.lang}_{self.stars[0]}"
 
 
 class RepoInfo(TypedDict):
@@ -101,8 +76,12 @@ def grab_repos_by_stars_range(stars: tuple[int, int], lang: str) -> Iterable[Rep
 def save(repos: list[RepoInfo], filename: str):
     """Save objects on a CSV file and save URLs on a TXT file."""
     print(f"Saving {len(repos)} repos to '{filename}'.")
-    export_to_csv(repos, Path(f"{filename}.csv"))
-    save_multiline_txt([repo["url"] for repo in repos], f"{filename}.txt")
+    utils.export_to_csv(repos, Path(f"{filename}.csv"))
+    utils.save_multiline_txt(
+        f"{filename}.txt",
+        [repo["url"] for repo in repos],
+        append=True,
+    )
 
 
 def assemble_repo_info_and_save(repos: Iterable[Repository], filename: str):
@@ -150,7 +129,6 @@ def extract_and_save(
 
 def main():
     args = ArgParser(underscores_to_dashes=True).parse_args()
-    args.check_args()
     extract_and_save(args.stars, args.lang, args.output, args.step, args.mode)
 
 

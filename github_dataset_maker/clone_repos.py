@@ -12,21 +12,7 @@ from typing import Iterable, Literal, Optional
 
 from tap import Tap as TypedArgumentParser
 
-
-def read_multiline_txt_file(file_path: Path | str) -> list[str]:
-    """Read a multiline text file and returns a list of lines."""
-    with open(file_path, "r") as f:
-        lines = f.read().split("\n")
-    if lines[-1] == "":
-        lines.pop()
-    return lines
-
-
-def write_multiline_txt_file(file_path: Path | str, lines: list[str], append: bool = False):
-    """Write a multiline text file."""
-    with open(file_path, "a" if append else "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
+from . import utils
 
 def clone_each(
     repos_urls: Iterable[str],
@@ -67,7 +53,7 @@ class SupportedExtensions:
 
 
 def create_clone_script(repo_list_path: Path, destination_dir: Path, script_path: Path, languages: list[str]):
-    txt_lines = read_multiline_txt_file(repo_list_path)
+    txt_lines = utils.read_multiline_txt_file(repo_list_path)
     # TODO add support for org/repo paths
     repos_urls = filter(lambda x: x.startswith(("git", "https")), txt_lines)
     commands = clone_each(
@@ -75,7 +61,7 @@ def create_clone_script(repo_list_path: Path, destination_dir: Path, script_path
         destination_dir,
         supported_files=SupportedExtensions.get(*languages),
     )
-    write_multiline_txt_file(script_path, commands, append=True)
+    utils.save_multiline_txt(script_path, commands, append=True)
     print("Done:", script_path)
 
 
