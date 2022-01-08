@@ -6,8 +6,11 @@ python -m github_dataset_maker.get_repos --mode ranged as well.
 """
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal, Optional
+
+from tap import Tap as TypedArgumentParser
 
 
 def read_multiline_txt_file(file_path: Path | str) -> list[str]:
@@ -19,16 +22,16 @@ def read_multiline_txt_file(file_path: Path | str) -> list[str]:
     return lines
 
 
-def write_multiline_txt_file(file_path: Path | str, lines: list[str]):
+def write_multiline_txt_file(file_path: Path | str, lines: list[str], append: bool = False):
     """Write a multiline text file."""
-    with open(file_path, "a") as f:
+    with open(file_path, "a" if append else "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
 
 def clone_each(
     repos_urls: Iterable[str],
     destination: Path,
-    supported_files: Iterable[str] = ["es", "es6", "js", "jsx", "ts", "tsx", "py"],
+    supported_files: Iterable[str],
     custom_ssh_key: Path | None = None,
 ) -> list[str]:
 
@@ -36,7 +39,7 @@ def clone_each(
     if custom_ssh_key is not None and custom_ssh_key.is_file():
         base_command += f" --config core.sshCommand=ssh -i {custom_ssh_key}"
     or_regex = r"\|".join(supported_files)
-    all_files_ending_in = rf".*\.\({or_regex}\)"
+    all_files_ending_in = rf".*.\({or_regex}\)"
     lines = []
     for url in repos_urls:
         org, repo = url.split("/")[-2:]
@@ -52,29 +55,60 @@ def clone_each(
     return lines
 
 
-def create_clone_script(repo_list_path: Path, destination_dir: Path, script_path: Path):
+class SupportedExtensions:
+    mapping: dict[str, list[str]] = {
+        "python": ["py"],
+        "javascript": ["es", "es6", "js", "jsx", "ts", "tsx"],
+        "java": [".java", ".class", ".apex", ".cls", ".kt", ".kts", ".ktm",".scala", ".sc"],
+    }
+    @classmethod
+    def get(cls, *languages: str) -> Iterable[str]:
+        return itertools.chain(*[cls.mapping[lang] for lang in languages])
+
+
+def create_clone_script(repo_list_path: Path, destination_dir: Path, script_path: Path, languages: list[str]):
     txt_lines = read_multiline_txt_file(repo_list_path)
-    repos_urls = filter(lambda x: x.startswith("git"), txt_lines)
+    # TODO add support for org/repo paths
+    repos_urls = filter(lambda x: x.startswith(("git", "https")), txt_lines)
     commands = clone_each(
-        repos_urls, destination_dir, custom_ssh_key=Path("~/.ssh/id_rsa-osf_github")
+        repos_urls,
+        destination_dir,
+        supported_files=SupportedExtensions.get(*languages),
     )
-    write_multiline_txt_file(script_path, commands)
+    write_multiline_txt_file(script_path, commands, append=True)
     print("Done:", script_path)
 
 
-if __name__ == "__main__":
-    split_lists: bool = False
-    # destination_dir = Path("/media/gaius/4tb-wd-blue/teia-python-repos")
-    destination_dir = Path("/media/gaius/4tb-wd-blue/osf-javascript-repos")
-    # input_path = Path("repo-lists/")
-    input_path = Path("osf-repos.txt")
-    script_path = Path("clone-all.sh")
-    if split_lists:
+class CloneScriptCreatorArgs(TypedArgumentParser):
+    custom_ssh_key: Optional[Path] = None  # Path to the ssh key to use for cloning.
+    destination_dir: Path = Path(".")  # Where to save the cloned repos
+    languages: list[Literal["python", "javascript", "java"]]
+    repo_list_path: Path  # Path to file containing repo URLs (one per line)
+    script_path: Path = Path("clone.sh") # Path to save the created script
+    split_lists: bool = False  # If true, glob repo_list_path for repo lists *.txt.
+    split_scripts: bool = False  # If true, each repo_list will be saved to a separate script.
+
+    def process_args(self) -> None:
+        if self.split_scripts and not self.split_lists:
+            raise ValueError("--split-scripts requires --split-lists.")
+
+
+def main():
+    args = CloneScriptCreatorArgs(underscores_to_dashes=True).parse_args()
+    repo_lists = [args.repo_list_path]
+    if args.split_lists:
         repo_lists = sorted(
-            input_path.glob(r"*.txt"),
+            args.repo_list_path.glob(r"*.txt"),
             key=lambda x: int(x.stem.split("_")[-1].split("-")[0]),
         )
-        for repo_list_path in repo_lists:
-            create_clone_script(repo_list_path, destination_dir, script_path)
-    else:
-        create_clone_script(input_path, destination_dir, script_path)
+    for i, sub_list in enumerate(repo_lists):
+        sub_script_path = args.script_path
+        if args.split_scripts:
+            sub_script_path = args.script_path.parent / f"{args.script_path.stem}_{i}.sh"
+        create_clone_script(
+            sub_list, args.destination_dir, sub_script_path, args.languages
+        )
+
+
+if __name__ == "__main__":
+    main()
